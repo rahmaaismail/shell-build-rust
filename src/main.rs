@@ -5,6 +5,39 @@ use std::path::Path;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
+fn parse_args(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_single_quote = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' if !in_single_quote => {
+                in_single_quote = true;
+            }
+            '\'' if in_single_quote => {
+                in_single_quote = false;
+            }
+            ' ' | '\t' if !in_single_quote => {
+                if !current.is_empty() {
+                    args.push(current.clone());
+                    current.clear();
+                }
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        args.push(current);
+    }
+
+    args
+}
+
 fn find_in_path(command: &str) -> Option<String> {
     let path_var = env::var("PATH").unwrap_or_default();
     for dir in path_var.split(':') {
@@ -31,13 +64,14 @@ fn main() {
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
         let input = input.trim();
-        let parts: Vec<&str> = input.split_whitespace().collect();
+
+        let parts = parse_args(input);
         
         if parts.is_empty() {
             continue;
         }
 
-        let command = parts[0];
+        let command = &parts[0];
         let args = &parts[1..];
 
         if command == "exit" {
@@ -46,7 +80,7 @@ fn main() {
             println!("{}", args.join(" "));
         } else if command == "type" {
             if let Some(arg) = args.first() {
-                if builtins.contains(arg) {
+                if builtins.contains(&arg.as_str()) {
                     println!("{} is a shell builtin", arg);
                 } else if let Some(path) = find_in_path(arg) {
                     println!("{} is {}", arg, path);
@@ -59,8 +93,8 @@ fn main() {
             println!("{}", cwd.display());
         } else if command == "cd" {
             if let Some(dir) = args.first() {
-                let target = if *dir == "~" {
-                    env:: var("HOME").unwrap_or_default()
+                let target = if dir == "~" {
+                    env::var("HOME").unwrap_or_default()
                 } else {
                     dir.to_string()
                 };
