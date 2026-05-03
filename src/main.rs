@@ -22,8 +22,7 @@ fn find_in_path(command: &str) -> Option<String> {
 }
 
 fn main() {
-    let builtins = vec!["echo", "exit", "type"];
-    let builtins = vec!["echo", "exit", "type", "pwd"];
+    let builtins = vec!["echo", "exit", "type", "pwd", "cd"];
 
     loop {
         print!("$ ");
@@ -58,6 +57,15 @@ fn main() {
         } else if command == "pwd" {
             let cwd = env::current_dir().unwrap();
             println!("{}", cwd.display());
+        } else if command == "cd" {
+            if let Some(dir) = args.first() {
+                let path = Path::new(dir);
+                if path.exists() {
+                    env::set_current_dir(path).unwrap();
+                } else {
+                    println!("cd: {}: No such file or directory", dir);
+                }
+            }
         } else if let Some(_path) = find_in_path(command) {
             Command::new(command)
                 .args(args)
