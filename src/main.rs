@@ -3,6 +3,7 @@ use std::io::{self, Write};
 use std::env;
 use std::path::Path;
 use std::os::unix::fs::PermissionsExt;
+use std::process::Command;
 
 fn find_in_path(command: &str) -> Option<String> {
     let path_var = env::var("PATH").unwrap_or_default();
@@ -27,23 +28,37 @@ fn main() {
         print!("$ ");
         io::stdout().flush().unwrap();
         
-        let mut command = String::new();
-        io::stdin().read_line(&mut command).unwrap();
-        command = command.trim().to_string();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+        let input = input.trim();
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        
+        if parts.is_empty() {
+            continue;
+        }
+
+        let command = parts[0];
+        let args = &parts[1..];
 
         if command == "exit" {
             break;
-        } else if command.starts_with("echo ") {
-            println!("{}", &command[5..]);
-        } else if command.starts_with("type ") {
-            let arg = &command[5..];
-            if builtins.contains(&arg) {
-                println!("{} is a shell builtin", arg);
-            } else if let Some(path) = find_in_path(arg) {
-                println!("{} is {}", arg, path);
-            } else {
-                println!("{}: not found", arg);
+        } else if command == "echo" {
+            println!("{}", args.join(" "));
+        } else if command == "type" {
+            if let Some(arg) = args.first() {
+                if builtins.contains(arg) {
+                    println!("{} is a shell builtin", arg);
+                } else if let Some(path) = find_in_path(arg) {
+                    println!("{} is {}", arg, path);
+                } else {
+                    println!("{}: not found", arg);
+                }
             }
+        } else if let Some(_path) = find_in_path(command) {
+            Command::new(command)
+                .args(args)
+                .status()
+                .unwrap();
         } else {
             println!("{}: command not found", command);
         }
