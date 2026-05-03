@@ -59,7 +59,12 @@ fn main() {
             println!("{}", cwd.display());
         } else if command == "cd" {
             if let Some(dir) = args.first() {
-                let path = Path::new(dir);
+                let target = if *dir == "~" {
+                    env:: var("HOME").unwrap_or_default()
+                } else {
+                    dir.to_string()
+                };
+                let path = Path::new(&target);
                 if path.exists() {
                     env::set_current_dir(path).unwrap();
                 } else {
