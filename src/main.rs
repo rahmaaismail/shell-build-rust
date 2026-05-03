@@ -20,6 +20,17 @@ fn parse_args(input: &str) -> Vec<String> {
                     current.push(next);
                 }
             }
+            '\\' if in_double_quote => {
+                // only escape " and \ inside double quotes, otherwise keep backslash
+                if let Some(next) = chars.next() {
+                    if next == '"' || next == '\\' {
+                        current.push(next);
+                    } else {
+                        current.push('\\');
+                        current.push(next);
+                    }
+                }
+            }
             '\'' if !in_single_quote && !in_double_quote => {
                 in_single_quote = true;
             }
