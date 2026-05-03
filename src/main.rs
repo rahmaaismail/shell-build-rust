@@ -14,6 +14,12 @@ fn parse_args(input: &str) -> Vec<String> {
 
     while let Some(c) = chars.next() {
         match c {
+            '\\' if !in_single_quote && !in_double_quote => {
+                // consume next char literally, drop the backslash
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
             '\'' if !in_single_quote && !in_double_quote => {
                 in_single_quote = true;
             }
