@@ -14,8 +14,11 @@ fn main() {
         // Exit the shell
         if command == "exit" {
             break;
-        }
-        println!("{}: command not found", command);
+        } else if command.starts_with("echo ") {
+            println!("{}", &command[5..]);
+        } else {
+            println!("{}: command not found", command);
+                  }
         }
 }
 
