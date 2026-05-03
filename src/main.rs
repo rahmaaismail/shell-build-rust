@@ -3,7 +3,8 @@ use std::io::{self, Write};
 use std::env;
 use std::path::Path;
 use std::os::unix::fs::PermissionsExt;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::fs::File;
 
 fn parse_args(input: &str) -> Vec<String> {
     let mut args = Vec::new();
@@ -15,13 +16,11 @@ fn parse_args(input: &str) -> Vec<String> {
     while let Some(c) = chars.next() {
         match c {
             '\\' if !in_single_quote && !in_double_quote => {
-                // consume next char literally, drop the backslash
                 if let Some(next) = chars.next() {
                     current.push(next);
                 }
             }
             '\\' if in_double_quote => {
-                // only escape " and \ inside double quotes, otherwise keep backslash
                 if let Some(next) = chars.next() {
                     if next == '"' || next == '\\' {
                         current.push(next);
@@ -62,6 +61,27 @@ fn parse_args(input: &str) -> Vec<String> {
     args
 }
 
+// returns (args_without_redirect, Option<output_file>)
+fn extract_redirect(parts: &[String]) -> (Vec<String>, Option<String>) {
+    let mut args = Vec::new();
+    let mut output_file = None;
+    let mut i = 0;
+
+    while i < parts.len() {
+        if parts[i] == ">" || parts[i] == "1>" {
+            if i + 1 < parts.len() {
+                output_file = Some(parts[i + 1].clone());
+                i += 2;
+            }
+        } else {
+            args.push(parts[i].clone());
+            i += 1;
+        }
+    }
+
+    (args, output_file)
+}
+
 fn find_in_path(command: &str) -> Option<String> {
     let path_var = env::var("PATH").unwrap_or_default();
     for dir in path_var.split(':') {
@@ -84,13 +104,17 @@ fn main() {
     loop {
         print!("$ ");
         io::stdout().flush().unwrap();
-        
+
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
         let input = input.trim();
 
         let parts = parse_args(input);
-        
+        if parts.is_empty() {
+            continue;
+        }
+
+        let (parts, output_file) = extract_redirect(&parts);
         if parts.is_empty() {
             continue;
         }
@@ -101,20 +125,38 @@ fn main() {
         if command == "exit" {
             break;
         } else if command == "echo" {
-            println!("{}", args.join(" "));
+            let output = args.join(" ");
+            if let Some(ref file) = output_file {
+                let mut f = File::create(file).unwrap();
+                writeln!(f, "{}", output).unwrap();
+            } else {
+                println!("{}", output);
+            }
         } else if command == "type" {
             if let Some(arg) = args.first() {
-                if builtins.contains(&arg.as_str()) {
-                    println!("{} is a shell builtin", arg);
+                let result = if builtins.contains(&arg.as_str()) {
+                    format!("{} is a shell builtin", arg)
                 } else if let Some(path) = find_in_path(arg) {
-                    println!("{} is {}", arg, path);
+                    format!("{} is {}", arg, path)
                 } else {
-                    println!("{}: not found", arg);
+                    format!("{}: not found", arg)
+                };
+                if let Some(ref file) = output_file {
+                    let mut f = File::create(file).unwrap();
+                    writeln!(f, "{}", result).unwrap();
+                } else {
+                    println!("{}", result);
                 }
             }
         } else if command == "pwd" {
             let cwd = env::current_dir().unwrap();
-            println!("{}", cwd.display());
+            let output = cwd.display().to_string();
+            if let Some(ref file) = output_file {
+                let mut f = File::create(file).unwrap();
+                writeln!(f, "{}", output).unwrap();
+            } else {
+                println!("{}", output);
+            }
         } else if command == "cd" {
             if let Some(dir) = args.first() {
                 let target = if dir == "~" {
@@ -130,10 +172,19 @@ fn main() {
                 }
             }
         } else if let Some(_path) = find_in_path(command) {
-            Command::new(command)
-                .args(args)
-                .status()
-                .unwrap();
+            if let Some(ref file) = output_file {
+                let f = File::create(file).unwrap();
+                Command::new(command)
+                    .args(args)
+                    .stdout(Stdio::from(f))
+                    .status()
+                    .unwrap();
+            } else {
+                Command::new(command)
+                    .args(args)
+                    .status()
+                    .unwrap();
+            }
         } else {
             println!("{}: command not found", command);
         }
