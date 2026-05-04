@@ -123,6 +123,8 @@ impl Completer for ShellHelper {
                     .arg(cmd_name)       // argv[1]: command name
                     .arg(current_word)   // argv[2]: word being completed
                     .arg(prev_word)      // argv[3]: previous word
+                    .env("COMP_LINE", prefix)
+                    .env("COMP_POINT", prefix.len().to_string())
                     .output();
 
                 if let Ok(output) = output {
