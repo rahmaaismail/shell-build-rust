@@ -15,7 +15,7 @@ use rustyline::validate::Validator;
 use rustyline::{CompletionType, Config, Context, Editor};
 use rustyline_derive::Helper;
 
-const BUILTINS: &[&str] = &["echo", "exit", "type", "pwd", "cd"];
+const BUILTINS: &[&str] = &["echo", "exit", "type", "pwd", "cd", "complete"];
 
 fn longest_common_prefix(strings: &[String]) -> String {
     if strings.is_empty() {
@@ -442,6 +442,12 @@ fn main() {
                             env::set_current_dir(path).unwrap();
                         } else {
                             println!("cd: {}: No such file or directory", dir);
+                        }
+                    }
+                } else if command == "complete"{
+                    if args.first().map(|s| s.as_str()) == Some("-p"){
+                        if let Some(cmd_name) = args.get(1){
+                            println!("complete: {}: no completion specification", cmd_name);
                         }
                     }
                 } else if let Some(_path) = find_in_path(command) {
