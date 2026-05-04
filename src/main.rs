@@ -61,16 +61,21 @@ fn parse_args(input: &str) -> Vec<String> {
     args
 }
 
-// returns (args_without_redirect, Option<output_file>)
-fn extract_redirect(parts: &[String]) -> (Vec<String>, Option<String>) {
+fn extract_redirect(parts: &[String]) -> (Vec<String>, Option<String>, Option<String>) {
     let mut args = Vec::new();
-    let mut output_file = None;
+    let mut stdout_file = None;
+    let mut stderr_file = None;
     let mut i = 0;
 
     while i < parts.len() {
         if parts[i] == ">" || parts[i] == "1>" {
             if i + 1 < parts.len() {
-                output_file = Some(parts[i + 1].clone());
+                stdout_file = Some(parts[i + 1].clone());
+                i += 2;
+            }
+        } else if parts[i] == "2>" {
+            if i + 1 < parts.len() {
+                stderr_file = Some(parts[i + 1].clone());
                 i += 2;
             }
         } else {
@@ -79,7 +84,7 @@ fn extract_redirect(parts: &[String]) -> (Vec<String>, Option<String>) {
         }
     }
 
-    (args, output_file)
+    (args, stdout_file, stderr_file)
 }
 
 fn find_in_path(command: &str) -> Option<String> {
@@ -114,9 +119,14 @@ fn main() {
             continue;
         }
 
-        let (parts, output_file) = extract_redirect(&parts);
+        let (parts, stdout_file, stderr_file) = extract_redirect(&parts);
         if parts.is_empty() {
             continue;
+        }
+
+        // create stderr file for builtins (they don't write to stderr)
+        if let Some(ref file) = stderr_file {
+            File::create(file).unwrap();
         }
 
         let command = &parts[0];
@@ -126,7 +136,7 @@ fn main() {
             break;
         } else if command == "echo" {
             let output = args.join(" ");
-            if let Some(ref file) = output_file {
+            if let Some(ref file) = stdout_file {
                 let mut f = File::create(file).unwrap();
                 writeln!(f, "{}", output).unwrap();
             } else {
@@ -141,7 +151,7 @@ fn main() {
                 } else {
                     format!("{}: not found", arg)
                 };
-                if let Some(ref file) = output_file {
+                if let Some(ref file) = stdout_file {
                     let mut f = File::create(file).unwrap();
                     writeln!(f, "{}", result).unwrap();
                 } else {
@@ -151,7 +161,7 @@ fn main() {
         } else if command == "pwd" {
             let cwd = env::current_dir().unwrap();
             let output = cwd.display().to_string();
-            if let Some(ref file) = output_file {
+            if let Some(ref file) = stdout_file {
                 let mut f = File::create(file).unwrap();
                 writeln!(f, "{}", output).unwrap();
             } else {
@@ -172,19 +182,17 @@ fn main() {
                 }
             }
         } else if let Some(_path) = find_in_path(command) {
-            if let Some(ref file) = output_file {
-                let f = File::create(file).unwrap();
-                Command::new(command)
-                    .args(args)
-                    .stdout(Stdio::from(f))
-                    .status()
-                    .unwrap();
-            } else {
-                Command::new(command)
-                    .args(args)
-                    .status()
-                    .unwrap();
+            let mut cmd = Command::new(command);
+            cmd.args(args);
+
+            if let Some(ref file) = stdout_file {
+                cmd.stdout(Stdio::from(File::create(file).unwrap()));
             }
+            if let Some(ref file) = stderr_file {
+                cmd.stderr(Stdio::from(File::create(file).unwrap()));
+            }
+
+            cmd.status().unwrap();
         } else {
             println!("{}: command not found", command);
         }
