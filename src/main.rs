@@ -92,10 +92,14 @@ impl Completer for ShellHelper {
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
         let prefix = &line[..pos];
 
-        // if there's a space, user is typing an argument — do file completion
+        // if there's a space, user is typing an argument — do file/dir completion
         if prefix.contains(' ') {
-            let file_prefix = prefix.split_whitespace().last().unwrap_or("");
-            let mut file_matches: Vec<String> = Vec::new();
+            let file_prefix = if prefix.ends_with(' '){
+                ""
+            } else {
+                prefix.split(' ').last().unwrap_or("")
+            };
+            let mut file_matches: Vec<(String, bool)> = Vec::new(); // (path, is_dir)
 
             let (dir, name_prefix) = if let Some(slash_pos) = file_prefix.rfind('/') {
                 (&file_prefix[..slash_pos + 1], &file_prefix[slash_pos + 1..])
@@ -109,18 +113,21 @@ impl Completer for ShellHelper {
                 for entry in entries.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
                     if name.starts_with(name_prefix) {
-                        file_matches.push(format!("{}{}", dir, name));
+                        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                        file_matches.push((format!("{}{}", dir, name), is_dir));
                     }
                 }
             }
 
-            file_matches.sort();
+            file_matches.sort_by(|a, b| a.0.cmp(&b.0));
 
             if file_matches.len() == 1 {
+                let (matched_path, is_dir) = &file_matches[0];
                 let cmd_and_space = &prefix[..prefix.len() - file_prefix.len()];
+                let suffix = if *is_dir { "/" } else { " " };
                 return Ok((0, vec![Pair {
-                    display: file_matches[0].clone(),
-                    replacement: format!("{}{} ", cmd_and_space, file_matches[0]),
+                    display: matched_path.clone(),
+                    replacement: format!("{}{}{}", cmd_and_space, matched_path, suffix),
                 }]));
             }
 
