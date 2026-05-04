@@ -532,6 +532,12 @@ if let Ok(histfile) = env::var("HISTFILE") {
                 let args = &parts[1..];
 
                 if command == "exit" {
+                    if let Ok(histfile) = env::var("HISTFILE") {
+                        let mut f = File::create(&histfile).unwrap();
+                        for cmd in &history {
+                            writeln!(f, "{}", cmd).unwrap();
+                        }
+                    }
                     break;
                 } else if command == "echo" {
                     let output = args.join(" ");
@@ -652,7 +658,15 @@ if let Ok(histfile) = env::var("HISTFILE") {
                     println!("{}: command not found", command);
                 }
             }
-            Err(ReadlineError::Eof) => break,
+            Err(ReadlineError::Eof) => {
+                if let Ok(histfile) = env::var("HISTFILE") {
+                    let mut f = File::create(&histfile).unwrap();
+                    for cmd in &history {
+                        writeln!(f, "{}", cmd).unwrap();
+                    }
+                }
+                break;
+            }
             Err(_) => break,
         }
     }
