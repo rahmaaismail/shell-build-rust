@@ -95,13 +95,21 @@ impl Completer for ShellHelper {
         // if there's a space, user is typing an argument — do file completion
         if prefix.contains(' ') {
             let file_prefix = prefix.split_whitespace().last().unwrap_or("");
-            let mut file_matches = Vec::new();
+            let mut file_matches: Vec<String> = Vec::new();
 
-            if let Ok(entries) = std::fs::read_dir(".") {
+            let (dir, name_prefix) = if let Some(slash_pos) = file_prefix.rfind('/') {
+                (&file_prefix[..slash_pos + 1], &file_prefix[slash_pos + 1..])
+            } else {
+                ("", file_prefix)
+            };
+
+            let read_dir_path = if dir.is_empty() { "." } else { dir };
+
+            if let Ok(entries) = std::fs::read_dir(read_dir_path) {
                 for entry in entries.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if name.starts_with(file_prefix) {
-                        file_matches.push(name);
+                    if name.starts_with(name_prefix) {
+                        file_matches.push(format!("{}{}", dir, name));
                     }
                 }
             }
@@ -109,10 +117,10 @@ impl Completer for ShellHelper {
             file_matches.sort();
 
             if file_matches.len() == 1 {
-                let before_file = &prefix[..prefix.len() - file_prefix.len()];
+                let cmd_and_space = &prefix[..prefix.len() - file_prefix.len()];
                 return Ok((0, vec![Pair {
                     display: file_matches[0].clone(),
-                    replacement: format!("{}{} ", before_file, file_matches[0]),
+                    replacement: format!("{}{} ", cmd_and_space, file_matches[0]),
                 }]));
             }
 
