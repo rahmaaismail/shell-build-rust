@@ -6,6 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::fs::{File, OpenOptions};
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -137,12 +138,10 @@ impl Completer for ShellHelper {
                 }]));
             }
 
-            // multiple matches — check LCP
             let names: Vec<String> = file_matches.iter().map(|(n, _)| n.clone()).collect();
             let lcp = longest_common_prefix(&names);
 
             if lcp.len() > file_prefix.len() {
-                // can complete further to LCP — no trailing char yet
                 let cmd_and_space = &prefix[..prefix.len() - file_prefix.len()];
                 *self.last_prefix.borrow_mut() = String::new();
                 *self.tab_count.borrow_mut() = 0;
@@ -152,7 +151,6 @@ impl Completer for ShellHelper {
                 }]));
             }
 
-            // no further LCP — bell on first tab, list on second
             let current_prefix = prefix.to_string();
             let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
 
@@ -369,6 +367,8 @@ fn main() {
     let mut rl = Editor::with_config(config).unwrap();
     rl.set_helper(Some(ShellHelper::new()));
 
+    let mut completions: HashMap<String, String> = HashMap::new();
+
     loop {
         let readline = rl.readline("$ ");
         match readline {
@@ -444,10 +444,18 @@ fn main() {
                             println!("cd: {}: No such file or directory", dir);
                         }
                     }
-                } else if command == "complete"{
-                    if args.first().map(|s| s.as_str()) == Some("-p"){
-                        if let Some(cmd_name) = args.get(1){
-                            println!("complete: {}: no completion specification", cmd_name);
+                } else if command == "complete" {
+                    if args.first().map(|s| s.as_str()) == Some("-p") {
+                        if let Some(cmd_name) = args.get(1) {
+                            if let Some(path) = completions.get(cmd_name.as_str()) {
+                                println!("complete -C '{}' {}", path, cmd_name);
+                            } else {
+                                println!("complete: {}: no completion specification", cmd_name);
+                            }
+                        }
+                    } else if args.first().map(|s| s.as_str()) == Some("-C") {
+                        if let (Some(path), Some(cmd_name)) = (args.get(1), args.get(2)) {
+                            completions.insert(cmd_name.clone(), path.clone());
                         }
                     }
                 } else if let Some(_path) = find_in_path(command) {
