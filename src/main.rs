@@ -35,6 +35,30 @@ fn longest_common_prefix(strings: &[String]) -> String {
     first[..lcp_len].to_string()
 }
 
+fn reap_jobs(bg_jobs: &mut Vec<(usize, std::process::Child, String)>) {
+    let mut done = Vec::new();
+    for (i, (_, child, _)) in bg_jobs.iter_mut().enumerate() {
+        if let Ok(Some(_)) = child.try_wait() {
+            done.push(i);
+        }
+    }
+    let total = bg_jobs.len();
+    for &i in &done {
+        let (job_num, _, cmd_str) = &bg_jobs[i];
+        let marker = if i + 1 == total {
+            "+"
+        } else if total >= 2 && i + 1 == total - 1 {
+            "-"
+        } else {
+            " "
+        };
+        println!("[{}]{}  Done                    {}", job_num, marker, cmd_str);
+    }
+    for i in done.into_iter().rev() {
+        bg_jobs.remove(i);
+    }
+}
+
 #[derive(Helper)]
 struct ShellHelper {
     last_prefix: RefCell<String>,
@@ -455,6 +479,8 @@ fn main() {
     let mut bg_jobs: Vec<(usize, std::process::Child, String)> = Vec::new();
 
     loop {
+        reap_jobs(&mut bg_jobs);
+
         let readline = rl.readline("$ ");
         match readline {
             Ok(line) => {
@@ -541,29 +567,29 @@ fn main() {
                         }
                     }
                 } else if command == "jobs" {
+                    // Check for newly completed jobs and display them inline, then remove
+                    let mut done = Vec::new();
+                    for (i, (_, child, _)) in bg_jobs.iter_mut().enumerate() {
+                        if let Ok(Some(_)) = child.try_wait() {
+                            done.push(i);
+                        }
+                    }
                     let total = bg_jobs.len();
-                    let mut done_indices = Vec::new();
-
-                    for (i, (job_num, child, cmd_str)) in bg_jobs.iter_mut().enumerate() {
-                        let marker = if i == total - 1 {
+                    for (i, (job_num, _, cmd_str)) in bg_jobs.iter().enumerate() {
+                        let marker = if i + 1 == total {
                             "+"
-                        } else if i == total - 2 {
+                        } else if total >= 2 && i + 1 == total - 1 {
                             "-"
                         } else {
                             " "
                         };
-                        match child.try_wait() {
-                            Ok(Some(_)) => {
-                                println!("[{}]{}  {:<24}{}", job_num, marker, "Done", cmd_str);
-                                done_indices.push(i);
-                            }
-                            _ => {
-                                println!("[{}]{}  {:<24}{} &", job_num, marker, "Running", cmd_str);
-                            }
+                        if done.contains(&i) {
+                            println!("[{}]{}  Done                    {}", job_num, marker, cmd_str);
+                        } else {
+                            println!("[{}]{}  Running                 {} &", job_num, marker, cmd_str);
                         }
                     }
-
-                    for i in done_indices.into_iter().rev() {
+                    for i in done.into_iter().rev() {
                         bg_jobs.remove(i);
                     }
                 } else if command == "complete" {
