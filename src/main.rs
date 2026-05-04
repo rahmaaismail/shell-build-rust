@@ -591,7 +591,10 @@ fn main() {
                 // expand variables in command and args
                 let command = expand_vars(command, &shell_vars);
                 let command = command.as_str();
-                let expanded_args: Vec<String> = args.iter().map(|a| expand_vars(a, &shell_vars)).collect();
+                let expanded_args: Vec<String> = args.iter()
+                    .map(|a| expand_vars(a, &shell_vars))
+                    .filter(|a| !a.is_empty())
+                    .collect();
                 let args = expanded_args.as_slice();
 
                 if command == "exit" {
