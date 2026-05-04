@@ -141,6 +141,22 @@ impl Completer for ShellHelper {
                     }
 
                     if candidates.len() > 1 {
+                        // check for LCP among candidates 
+                        let candidate_strings: Vec<String> = candidates.iter().map(|s| s.to_string()).collect();
+                        let lcp = longest_common_prefix(&candidate_strings);
+
+                        if lcp.len() > current_word.len() {
+                            // can complete further to LCP
+                            let before_arg = &prefix[..prefix.len() - current_word.len()];
+                            *self.last_prefix.borrow_mut() = String::new();
+                            *self.tab_count.borrow_mut() = 0;
+                            return Ok((0, vec![Pair {
+                                display: lcp.clone(),
+                                replacement: format!("{}{}", before_arg,lcp),
+                            }]));
+                        }
+                        
+                        // no LCP - bell on first tab, list on second
                         let current_prefix = prefix.to_string();
                         let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
 
