@@ -19,7 +19,7 @@ use rustyline_derive::Helper;
 
 extern crate libc;
 
-const BUILTINS: &[&str] = &["echo", "exit", "type", "pwd", "cd", "complete", "jobs"];
+const BUILTINS: &[&str] = &["echo", "exit", "type", "pwd", "cd", "complete", "jobs", "history"];
 
 fn longest_common_prefix(strings: &[String]) -> String {
     if strings.is_empty() { return String::new(); }
@@ -482,6 +482,7 @@ fn main() {
     let mut rl = Editor::with_config(config).unwrap();
     rl.set_helper(Some(ShellHelper::new(Rc::clone(&completions))));
     let mut bg_jobs: Vec<(usize, std::process::Child, String)> = Vec::new();
+    let mut history: Vec<String> = Vec::new();
 
     loop {
         reap_jobs(&mut bg_jobs);
@@ -491,6 +492,8 @@ fn main() {
             Ok(line) => {
                 let input = line.trim();
                 if input.is_empty() { continue; }
+
+                history.push(input.to_string());
 
                 let segments = split_pipeline(input);
                 if segments.len() > 1 {
@@ -558,6 +561,10 @@ fn main() {
                         else { println!("[{}]{}  Running                 {} &", job_num, marker, cmd_str); }
                     }
                     for i in done.into_iter().rev() { bg_jobs.remove(i); }
+                } else if command == "history" {
+                    for (i, cmd) in history.iter().enumerate() {
+                        println!("{:>4}  {}", i + 1, cmd);
+                    }
                 } else if command == "complete" {
                     if args.first().map(|s| s.as_str()) == Some("-p") {
                         if let Some(cmd_name) = args.get(1) {
