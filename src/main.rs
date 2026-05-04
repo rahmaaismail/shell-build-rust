@@ -137,7 +137,22 @@ impl Completer for ShellHelper {
                 }]));
             }
 
-            // multiple matches — bell on first tab, list on second
+            // multiple matches — check LCP
+            let names: Vec<String> = file_matches.iter().map(|(n, _)| n.clone()).collect();
+            let lcp = longest_common_prefix(&names);
+
+            if lcp.len() > file_prefix.len() {
+                // can complete further to LCP — no trailing char yet
+                let cmd_and_space = &prefix[..prefix.len() - file_prefix.len()];
+                *self.last_prefix.borrow_mut() = String::new();
+                *self.tab_count.borrow_mut() = 0;
+                return Ok((0, vec![Pair {
+                    display: lcp.clone(),
+                    replacement: format!("{}{}", cmd_and_space, lcp),
+                }]));
+            }
+
+            // no further LCP — bell on first tab, list on second
             let current_prefix = prefix.to_string();
             let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
 
