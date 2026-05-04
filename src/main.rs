@@ -17,6 +17,22 @@ use rustyline_derive::Helper;
 
 const BUILTINS: &[&str] = &["echo", "exit", "type", "pwd", "cd"];
 
+fn longest_common_prefix(strings: &[String]) -> String {
+    if strings.is_empty() {
+        return String::new();
+    }
+    let first = &strings[0];
+    let mut lcp_len = first.len();
+    for s in &strings[1..] {
+        lcp_len = lcp_len.min(s.len());
+        lcp_len = first.chars().zip(s.chars())
+            .take(lcp_len)
+            .take_while(|(a, b)| a == b)
+            .count();
+    }
+    first[..lcp_len].to_string()
+}
+
 #[derive(Helper)]
 struct ShellHelper {
     last_prefix: RefCell<String>,
@@ -77,8 +93,11 @@ impl Completer for ShellHelper {
         let prefix = &line[..pos];
         let matches = self.get_matches(prefix);
 
+        if matches.is_empty() {
+            return Ok((0, vec![]));
+        }
+
         if matches.len() == 1 {
-            // single match — complete immediately
             *self.last_prefix.borrow_mut() = String::new();
             *self.tab_count.borrow_mut() = 0;
             return Ok((0, vec![Pair {
@@ -87,36 +106,44 @@ impl Completer for ShellHelper {
             }]));
         }
 
-        if matches.len() > 1 {
-            let current_prefix = prefix.to_string();
-            let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
+        // find longest common prefix of all matches
+        let lcp = longest_common_prefix(&matches);
 
-            if is_same_prefix {
-                *self.tab_count.borrow_mut() += 1;
-            } else {
-                *self.last_prefix.borrow_mut() = current_prefix;
-                *self.tab_count.borrow_mut() = 1;
-            }
-
-            let count = *self.tab_count.borrow();
-
-            if count == 1 {
-                // first tab — ring bell
-                print!("\x07");
-                std::io::stdout().flush().unwrap();
-                return Ok((0, vec![]));
-            } else {
-                // second tab — print all matches
-                *self.tab_count.borrow_mut() = 0;
-                println!();
-                println!("{}", matches.join("  "));
-                print!("$ {}", prefix);
-                std::io::stdout().flush().unwrap();
-                return Ok((0, vec![]));
-            }
+        // if LCP is longer than what user typed, complete to LCP (no trailing space)
+        if lcp.len() > prefix.len() {
+            *self.last_prefix.borrow_mut() = String::new();
+            *self.tab_count.borrow_mut() = 0;
+            return Ok((0, vec![Pair {
+                display: lcp.clone(),
+                replacement: lcp,
+            }]));
         }
 
-        Ok((0, vec![]))
+        // LCP == prefix, multiple matches — bell then show all
+        let current_prefix = prefix.to_string();
+        let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
+
+        if is_same_prefix {
+            *self.tab_count.borrow_mut() += 1;
+        } else {
+            *self.last_prefix.borrow_mut() = current_prefix;
+            *self.tab_count.borrow_mut() = 1;
+        }
+
+        let count = *self.tab_count.borrow();
+
+        if count == 1 {
+            print!("\x07");
+            std::io::stdout().flush().unwrap();
+            return Ok((0, vec![]));
+        } else {
+            *self.tab_count.borrow_mut() = 0;
+            println!();
+            println!("{}", matches.join("  "));
+            print!("$ {}", prefix);
+            std::io::stdout().flush().unwrap();
+            return Ok((0, vec![]));
+        }
     }
 }
 
