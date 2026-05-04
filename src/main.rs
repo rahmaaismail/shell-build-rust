@@ -494,6 +494,7 @@ fn main() {
                 if input.is_empty() { continue; }
 
                 history.push(input.to_string());
+                let _ = rl.add_history_entry(input);
 
                 let segments = split_pipeline(input);
                 if segments.len() > 1 {
