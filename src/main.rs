@@ -452,7 +452,7 @@ fn main() {
     rl.set_helper(Some(ShellHelper::new(Rc::clone(&completions))));
 
     let mut job_counter: usize = 0;
-    let mut bg_jobs: Vec<(usize, u32, String)> = Vec::new();
+    let mut bg_jobs: Vec<(usize, std::process::Child, String)> = Vec::new();
 
     loop {
         let readline = rl.readline("$ ");
@@ -468,7 +468,6 @@ fn main() {
                     continue;
                 }
 
-                // detect background job
                 let background = parts.last().map(|s| s.as_str()) == Some("&");
                 let parts: Vec<String> = if background {
                     parts[..parts.len() - 1].to_vec()
@@ -543,15 +542,29 @@ fn main() {
                     }
                 } else if command == "jobs" {
                     let total = bg_jobs.len();
-                    for (i, (job_num, _pid, cmd_str)) in bg_jobs.iter().enumerate() {
-                        let marker = if i == total - 1 { 
+                    let mut done_indices = Vec::new();
+
+                    for (i, (job_num, child, cmd_str)) in bg_jobs.iter_mut().enumerate() {
+                        let marker = if i == total - 1 {
                             "+"
                         } else if i == total - 2 {
                             "-"
                         } else {
                             " "
                         };
-                        println!("[{}]{}  {:<24}{} &", job_num, marker, "Running", cmd_str);
+                        match child.try_wait() {
+                            Ok(Some(_)) => {
+                                println!("[{}]{}  {:<24}{}", job_num, marker, "Done", cmd_str);
+                                done_indices.push(i);
+                            }
+                            _ => {
+                                println!("[{}]{}  {:<24}{} &", job_num, marker, "Running", cmd_str);
+                            }
+                        }
+                    }
+
+                    for i in done_indices.into_iter().rev() {
+                        bg_jobs.remove(i);
                     }
                 } else if command == "complete" {
                     if args.first().map(|s| s.as_str()) == Some("-p") {
@@ -588,7 +601,7 @@ fn main() {
                         job_counter += 1;
                         let cmd_str = format!("{} {}", command, args.join(" ")).trim().to_string();
                         println!("[{}] {}", job_counter, pid);
-                        bg_jobs.push((job_counter, pid, cmd_str));
+                        bg_jobs.push((job_counter, child, cmd_str));
                     } else {
                         cmd.status().unwrap();
                     }
