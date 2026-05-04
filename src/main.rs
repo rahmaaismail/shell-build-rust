@@ -562,8 +562,18 @@ fn main() {
                     }
                     for i in done.into_iter().rev() { bg_jobs.remove(i); }
                 } else if command == "history" {
-                    for (i, cmd) in history.iter().enumerate() {
-                        println!("{:>4}  {}", i + 1, cmd);
+                    let total = history.len();
+                    let start = if let Some(n_str) = args.first() {
+                        if let Ok(n) = n_str.parse::<usize>() {
+                            total.saturating_sub(n)
+                        } else {
+                            0
+                        }
+                    } else {
+                        0
+                    };
+                    for (i, cmd) in history[start..].iter().enumerate() {
+                        println!("{:>4}  {}", start + i + 1, cmd);
                     }
                 } else if command == "complete" {
                     if args.first().map(|s| s.as_str()) == Some("-p") {
