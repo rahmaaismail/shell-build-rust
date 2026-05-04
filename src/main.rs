@@ -1,10 +1,54 @@
 #[allow(unused_imports)]
-use std::io::{self, Write};
+use std::io::Write;
 use std::env;
 use std::path::Path;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::fs::{File, OpenOptions};
+
+use rustyline::completion::{Completer, Pair};
+use rustyline::error::ReadlineError;
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::validate::Validator;
+use rustyline::{CompletionType, Config, Context, Editor};
+use rustyline_derive::Helper;
+
+const BUILTINS: &[&str] = &["echo", "exit", "type", "pwd", "cd"];
+
+#[derive(Helper)]
+struct ShellHelper;
+
+impl Completer for ShellHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        let prefix = &line[..pos];
+        let mut matches = Vec::new();
+
+        for &builtin in BUILTINS {
+            if builtin.starts_with(prefix) {
+                matches.push(Pair {
+                    display: builtin.to_string(),
+                    replacement: format!("{} ", builtin),
+                });
+            }
+        }
+
+        Ok((0, matches))
+    }
+}
+
+impl Hinter for ShellHelper {
+    type Hint = String;
+}
+impl Highlighter for ShellHelper {}
+impl Validator for ShellHelper {}
 
 fn parse_args(input: &str) -> Vec<String> {
     let mut args = Vec::new();
@@ -61,7 +105,6 @@ fn parse_args(input: &str) -> Vec<String> {
     args
 }
 
-// returns (args, Option<(stdout_file, append)>, Option<(stderr_file, append)>)
 fn extract_redirect(parts: &[String]) -> (Vec<String>, Option<(String, bool)>, Option<(String, bool)>) {
     let mut args = Vec::new();
     let mut stdout_file = None;
@@ -125,97 +168,106 @@ fn find_in_path(command: &str) -> Option<String> {
 }
 
 fn main() {
-    let builtins = vec!["echo", "exit", "type", "pwd", "cd"];
+    let config = Config::builder()
+        .completion_type(CompletionType::List)
+        .build();
+
+    let mut rl = Editor::with_config(config).unwrap();
+    rl.set_helper(Some(ShellHelper));
 
     loop {
-        print!("$ ");
-        io::stdout().flush().unwrap();
+        let readline = rl.readline("$ ");
+        match readline {
+            Ok(line) => {
+                let input = line.trim();
+                if input.is_empty() {
+                    continue;
+                }
 
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
-        let input = input.trim();
+                let parts = parse_args(input);
+                if parts.is_empty() {
+                    continue;
+                }
 
-        let parts = parse_args(input);
-        if parts.is_empty() {
-            continue;
-        }
+                let (parts, stdout_redirect, stderr_redirect) = extract_redirect(&parts);
+                if parts.is_empty() {
+                    continue;
+                }
 
-        let (parts, stdout_redirect, stderr_redirect) = extract_redirect(&parts);
-        if parts.is_empty() {
-            continue;
-        }
+                if let Some((ref file, append)) = stderr_redirect {
+                    open_file(file, append);
+                }
 
-        // create/append stderr file for builtins (they don't write to stderr)
-        if let Some((ref file, append)) = stderr_redirect {
-            open_file(file, append);
-        }
+                let command = &parts[0];
+                let args = &parts[1..];
 
-        let command = &parts[0];
-        let args = &parts[1..];
+                if command == "exit" {
+                    break;
+                } else if command == "echo" {
+                    let output = args.join(" ");
+                    if let Some((ref file, append)) = stdout_redirect {
+                        let mut f = open_file(file, append);
+                        writeln!(f, "{}", output).unwrap();
+                    } else {
+                        println!("{}", output);
+                    }
+                } else if command == "type" {
+                    if let Some(arg) = args.first() {
+                        let result = if BUILTINS.contains(&arg.as_str()) {
+                            format!("{} is a shell builtin", arg)
+                        } else if let Some(path) = find_in_path(arg) {
+                            format!("{} is {}", arg, path)
+                        } else {
+                            format!("{}: not found", arg)
+                        };
+                        if let Some((ref file, append)) = stdout_redirect {
+                            let mut f = open_file(file, append);
+                            writeln!(f, "{}", result).unwrap();
+                        } else {
+                            println!("{}", result);
+                        }
+                    }
+                } else if command == "pwd" {
+                    let cwd = env::current_dir().unwrap();
+                    let output = cwd.display().to_string();
+                    if let Some((ref file, append)) = stdout_redirect {
+                        let mut f = open_file(file, append);
+                        writeln!(f, "{}", output).unwrap();
+                    } else {
+                        println!("{}", output);
+                    }
+                } else if command == "cd" {
+                    if let Some(dir) = args.first() {
+                        let target = if dir == "~" {
+                            env::var("HOME").unwrap_or_default()
+                        } else {
+                            dir.to_string()
+                        };
+                        let path = Path::new(&target);
+                        if path.exists() {
+                            env::set_current_dir(path).unwrap();
+                        } else {
+                            println!("cd: {}: No such file or directory", dir);
+                        }
+                    }
+                } else if let Some(_path) = find_in_path(command) {
+                    let mut cmd = Command::new(command);
+                    cmd.args(args);
 
-        if command == "exit" {
-            break;
-        } else if command == "echo" {
-            let output = args.join(" ");
-            if let Some((ref file, append)) = stdout_redirect {
-                let mut f = open_file(file, append);
-                writeln!(f, "{}", output).unwrap();
-            } else {
-                println!("{}", output);
-            }
-        } else if command == "type" {
-            if let Some(arg) = args.first() {
-                let result = if builtins.contains(&arg.as_str()) {
-                    format!("{} is a shell builtin", arg)
-                } else if let Some(path) = find_in_path(arg) {
-                    format!("{} is {}", arg, path)
+                    if let Some((ref file, append)) = stdout_redirect {
+                        cmd.stdout(Stdio::from(open_file(file, append)));
+                    }
+                    if let Some((ref file, append)) = stderr_redirect {
+                        cmd.stderr(Stdio::from(open_file(file, append)));
+                    }
+
+                    cmd.status().unwrap();
                 } else {
-                    format!("{}: not found", arg)
-                };
-                if let Some((ref file, append)) = stdout_redirect {
-                    let mut f = open_file(file, append);
-                    writeln!(f, "{}", result).unwrap();
-                } else {
-                    println!("{}", result);
+                    println!("{}: command not found", command);
                 }
             }
-        } else if command == "pwd" {
-            let cwd = env::current_dir().unwrap();
-            let output = cwd.display().to_string();
-            if let Some((ref file, append)) = stdout_redirect {
-                let mut f = open_file(file, append);
-                writeln!(f, "{}", output).unwrap();
-            } else {
-                println!("{}", output);
-            }
-        } else if command == "cd" {
-            if let Some(dir) = args.first() {
-                let target = if dir == "~" {
-                    env::var("HOME").unwrap_or_default()
-                } else {
-                    dir.to_string()
-                };
-                let path = Path::new(&target);
-                if path.exists() {
-                    env::set_current_dir(path).unwrap();
-                } else {
-                    println!("cd: {}: No such file or directory", dir);
-                }
-            }
-        } else if let Some(_path) = find_in_path(command) {
-            let mut cmd = Command::new(command);
-            cmd.args(args);
-
-            if let Some((ref file, append)) = stdout_redirect {
-                cmd.stdout(Stdio::from(open_file(file, append)));
-            }
-            if let Some((ref file, append)) = stderr_redirect {
-                cmd.stderr(Stdio::from(open_file(file, append)));
-            }
-
-            cmd.status().unwrap();
-        } else {
-            println!("{}: command not found", command);
+            Err(ReadlineError::Eof) => break,
+            Err(_) => break,
         }
     }
 }
