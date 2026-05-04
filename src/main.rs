@@ -648,6 +648,15 @@ if let Ok(histfile) = env::var("HISTFILE") {
                                 eprintln!("declare: {}: not found", var_name);
                             }
                         }
+                    } else {
+                        // handle declare NAME=VALUE
+                        for arg in args {
+                            if let Some(eq_pos) = arg.find('=') {
+                                let name = &arg[..eq_pos];
+                                let value = &arg[eq_pos + 1..];
+                                shell_vars.insert(name.to_string(), value.to_string());
+                            }
+                        }
                     }
                 } else if let Some(_path) = find_in_path(command) {
                     let mut cmd = Command::new(command);
