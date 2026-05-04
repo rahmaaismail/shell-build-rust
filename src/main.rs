@@ -45,17 +45,84 @@ fn reap_jobs(bg_jobs: &mut Vec<(usize, std::process::Child, String)>) {
     let total = bg_jobs.len();
     for &i in &done {
         let (job_num, _, cmd_str) = &bg_jobs[i];
-        let marker = if i + 1 == total {
-            "+"
-        } else if total >= 2 && i + 1 == total - 1 {
-            "-"
-        } else {
-            " "
-        };
+        let marker = if i + 1 == total { "+" } else if total >= 2 && i + 1 == total - 1 { "-" } else { " " };
         println!("[{}]{}  Done                    {}", job_num, marker, cmd_str);
     }
     for i in done.into_iter().rev() {
         bg_jobs.remove(i);
+    }
+}
+
+// Split raw input on unquoted pipe characters into segments
+fn split_pipeline(input: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' if !in_double => { in_single = !in_single; current.push(c); }
+            '"' if !in_single => { in_double = !in_double; current.push(c); }
+            '|' if !in_single && !in_double => {
+                segments.push(current.trim().to_string());
+                current = String::new();
+            }
+            _ => { current.push(c); }
+        }
+    }
+    segments.push(current.trim().to_string());
+    segments
+}
+
+fn run_pipeline(segments: &[String]) {
+    if segments.len() < 2 {
+        return;
+    }
+
+    let mut children: Vec<std::process::Child> = Vec::new();
+    let mut prev_stdout: Option<std::process::ChildStdout> = None;
+
+    for (i, seg) in segments.iter().enumerate() {
+        let parts = parse_args(seg);
+        if parts.is_empty() {
+            continue;
+        }
+        let command = &parts[0];
+        let args = &parts[1..];
+
+        let is_last = i == segments.len() - 1;
+
+        let stdin = if let Some(stdout) = prev_stdout.take() {
+            Stdio::from(stdout)
+        } else {
+            Stdio::inherit()
+        };
+
+        let stdout = if is_last {
+            Stdio::inherit()
+        } else {
+            Stdio::piped()
+        };
+
+        let mut cmd = Command::new(command);
+        cmd.args(args).stdin(stdin).stdout(stdout);
+
+        match cmd.spawn() {
+            Ok(mut child) => {
+                prev_stdout = child.stdout.take();
+                children.push(child);
+            }
+            Err(e) => {
+                eprintln!("{}: {}", command, e);
+                return;
+            }
+        }
+    }
+
+    for mut child in children {
+        let _ = child.wait();
     }
 }
 
@@ -178,16 +245,13 @@ impl Completer for ShellHelper {
 
                         let current_prefix = prefix.to_string();
                         let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
-
                         if is_same_prefix {
                             *self.tab_count.borrow_mut() += 1;
                         } else {
                             *self.last_prefix.borrow_mut() = current_prefix;
                             *self.tab_count.borrow_mut() = 1;
                         }
-
                         let count = *self.tab_count.borrow();
-
                         if count == 1 {
                             print!("\x07");
                             std::io::stdout().flush().unwrap();
@@ -202,7 +266,6 @@ impl Completer for ShellHelper {
                         }
                     }
                 }
-
                 return Ok((0, vec![]));
             }
 
@@ -260,16 +323,13 @@ impl Completer for ShellHelper {
 
             let current_prefix = prefix.to_string();
             let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
-
             if is_same_prefix {
                 *self.tab_count.borrow_mut() += 1;
             } else {
                 *self.last_prefix.borrow_mut() = current_prefix;
                 *self.tab_count.borrow_mut() = 1;
             }
-
             let count = *self.tab_count.borrow();
-
             if count == 1 {
                 print!("\x07");
                 std::io::stdout().flush().unwrap();
@@ -317,16 +377,13 @@ impl Completer for ShellHelper {
 
         let current_prefix = prefix.to_string();
         let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
-
         if is_same_prefix {
             *self.tab_count.borrow_mut() += 1;
         } else {
             *self.last_prefix.borrow_mut() = current_prefix;
             *self.tab_count.borrow_mut() = 1;
         }
-
         let count = *self.tab_count.borrow();
-
         if count == 1 {
             print!("\x07");
             std::io::stdout().flush().unwrap();
@@ -372,27 +429,17 @@ fn parse_args(input: &str) -> Vec<String> {
                     }
                 }
             }
-            '\'' if !in_single_quote && !in_double_quote => {
-                in_single_quote = true;
-            }
-            '\'' if in_single_quote => {
-                in_single_quote = false;
-            }
-            '"' if !in_single_quote && !in_double_quote => {
-                in_double_quote = true;
-            }
-            '"' if in_double_quote => {
-                in_double_quote = false;
-            }
+            '\'' if !in_single_quote && !in_double_quote => { in_single_quote = true; }
+            '\'' if in_single_quote => { in_single_quote = false; }
+            '"' if !in_single_quote && !in_double_quote => { in_double_quote = true; }
+            '"' if in_double_quote => { in_double_quote = false; }
             ' ' | '\t' if !in_single_quote && !in_double_quote => {
                 if !current.is_empty() {
                     args.push(current.clone());
                     current.clear();
                 }
             }
-            _ => {
-                current.push(c);
-            }
+            _ => { current.push(c); }
         }
     }
 
@@ -411,25 +458,13 @@ fn extract_redirect(parts: &[String]) -> (Vec<String>, Option<(String, bool)>, O
 
     while i < parts.len() {
         if parts[i] == ">>" || parts[i] == "1>>" {
-            if i + 1 < parts.len() {
-                stdout_file = Some((parts[i + 1].clone(), true));
-                i += 2;
-            }
+            if i + 1 < parts.len() { stdout_file = Some((parts[i + 1].clone(), true)); i += 2; }
         } else if parts[i] == ">" || parts[i] == "1>" {
-            if i + 1 < parts.len() {
-                stdout_file = Some((parts[i + 1].clone(), false));
-                i += 2;
-            }
+            if i + 1 < parts.len() { stdout_file = Some((parts[i + 1].clone(), false)); i += 2; }
         } else if parts[i] == "2>>" {
-            if i + 1 < parts.len() {
-                stderr_file = Some((parts[i + 1].clone(), true));
-                i += 2;
-            }
+            if i + 1 < parts.len() { stderr_file = Some((parts[i + 1].clone(), true)); i += 2; }
         } else if parts[i] == "2>" {
-            if i + 1 < parts.len() {
-                stderr_file = Some((parts[i + 1].clone(), false));
-                i += 2;
-            }
+            if i + 1 < parts.len() { stderr_file = Some((parts[i + 1].clone(), false)); i += 2; }
         } else {
             args.push(parts[i].clone());
             i += 1;
@@ -441,12 +476,8 @@ fn extract_redirect(parts: &[String]) -> (Vec<String>, Option<(String, bool)>, O
 
 fn open_file(file: &str, append: bool) -> File {
     OpenOptions::new()
-        .write(true)
-        .create(true)
-        .append(append)
-        .truncate(!append)
-        .open(file)
-        .unwrap()
+        .write(true).create(true).append(append).truncate(!append)
+        .open(file).unwrap()
 }
 
 fn find_in_path(command: &str) -> Option<String> {
@@ -471,7 +502,6 @@ fn main() {
         .build();
 
     let completions: Rc<RefCell<HashMap<String, String>>> = Rc::new(RefCell::new(HashMap::new()));
-
     let mut rl = Editor::with_config(config).unwrap();
     rl.set_helper(Some(ShellHelper::new(Rc::clone(&completions))));
 
@@ -488,26 +518,22 @@ fn main() {
                     continue;
                 }
 
-                let parts = parse_args(input);
-                if parts.is_empty() {
+                // handle pipelines
+                let segments = split_pipeline(input);
+                if segments.len() > 1 {
+                    run_pipeline(&segments);
                     continue;
                 }
+
+                let parts = parse_args(input);
+                if parts.is_empty() { continue; }
 
                 let background = parts.last().map(|s| s.as_str()) == Some("&");
-                let parts: Vec<String> = if background {
-                    parts[..parts.len() - 1].to_vec()
-                } else {
-                    parts
-                };
-
-                if parts.is_empty() {
-                    continue;
-                }
+                let parts: Vec<String> = if background { parts[..parts.len() - 1].to_vec() } else { parts };
+                if parts.is_empty() { continue; }
 
                 let (parts, stdout_redirect, stderr_redirect) = extract_redirect(&parts);
-                if parts.is_empty() {
-                    continue;
-                }
+                if parts.is_empty() { continue; }
 
                 if let Some((ref file, append)) = stderr_redirect {
                     open_file(file, append);
@@ -553,11 +579,7 @@ fn main() {
                     }
                 } else if command == "cd" {
                     if let Some(dir) = args.first() {
-                        let target = if dir == "~" {
-                            env::var("HOME").unwrap_or_default()
-                        } else {
-                            dir.to_string()
-                        };
+                        let target = if dir == "~" { env::var("HOME").unwrap_or_default() } else { dir.to_string() };
                         let path = Path::new(&target);
                         if path.exists() {
                             env::set_current_dir(path).unwrap();
@@ -568,28 +590,18 @@ fn main() {
                 } else if command == "jobs" {
                     let mut done = Vec::new();
                     for (i, (_, child, _)) in bg_jobs.iter_mut().enumerate() {
-                        if let Ok(Some(_)) = child.try_wait() {
-                            done.push(i);
-                        }
+                        if let Ok(Some(_)) = child.try_wait() { done.push(i); }
                     }
                     let total = bg_jobs.len();
                     for (i, (job_num, _, cmd_str)) in bg_jobs.iter().enumerate() {
-                        let marker = if i + 1 == total {
-                            "+"
-                        } else if total >= 2 && i + 1 == total - 1 {
-                            "-"
-                        } else {
-                            " "
-                        };
+                        let marker = if i + 1 == total { "+" } else if total >= 2 && i + 1 == total - 1 { "-" } else { " " };
                         if done.contains(&i) {
                             println!("[{}]{}  Done                    {}", job_num, marker, cmd_str);
                         } else {
                             println!("[{}]{}  Running                 {} &", job_num, marker, cmd_str);
                         }
                     }
-                    for i in done.into_iter().rev() {
-                        bg_jobs.remove(i);
-                    }
+                    for i in done.into_iter().rev() { bg_jobs.remove(i); }
                 } else if command == "complete" {
                     if args.first().map(|s| s.as_str()) == Some("-p") {
                         if let Some(cmd_name) = args.get(1) {
@@ -611,21 +623,17 @@ fn main() {
                 } else if let Some(_path) = find_in_path(command) {
                     let mut cmd = Command::new(command);
                     cmd.args(args);
-
                     if let Some((ref file, append)) = stdout_redirect {
                         cmd.stdout(Stdio::from(open_file(file, append)));
                     }
                     if let Some((ref file, append)) = stderr_redirect {
                         cmd.stderr(Stdio::from(open_file(file, append)));
                     }
-
                     if background {
                         let child = cmd.spawn().unwrap();
                         let pid = child.id();
-                        // find smallest available job number
                         let job_num = {
-                            let used: std::collections::HashSet<usize> =
-                                bg_jobs.iter().map(|(n, _, _)| *n).collect();
+                            let used: std::collections::HashSet<usize> = bg_jobs.iter().map(|(n, _, _)| *n).collect();
                             (1..).find(|n| !used.contains(n)).unwrap()
                         };
                         let cmd_str = format!("{} {}", command, args.join(" ")).trim().to_string();
