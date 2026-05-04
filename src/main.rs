@@ -129,7 +129,8 @@ impl Completer for ShellHelper {
 
                 if let Ok(output) = output {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    let candidates: Vec<&str> = stdout.lines().collect();
+                    let mut candidates: Vec<&str> = stdout.lines().collect();
+                    candidates.sort();
 
                     if candidates.len() == 1 {
                         let before_arg = &prefix[..prefix.len() - current_word.len()];
@@ -137,6 +138,33 @@ impl Completer for ShellHelper {
                             display: candidates[0].to_string(),
                             replacement: format!("{}{} ", before_arg, candidates[0]),
                         }]));
+                    }
+
+                    if candidates.len() > 1 {
+                        let current_prefix = prefix.to_string();
+                        let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
+
+                        if is_same_prefix {
+                            *self.tab_count.borrow_mut() += 1;
+                        } else {
+                            *self.last_prefix.borrow_mut() = current_prefix;
+                            *self.tab_count.borrow_mut() = 1;
+                        }
+                        
+                        let count = *self.tab_count.borrow();
+
+                        if count == 1 {
+                            print!("\x07");
+                            std::io::stdout().flush().unwrap();
+                            return Ok((0, vec![]));
+                        } else {
+                            *self.tab_count.borrow_mut() = 0;
+                            println!();
+                            println!("{}", candidates.join(" "));
+                            print!("$ {}", prefix);
+                            std::io::stdout().flush().unwrap();
+                            return Ok((0,vec![]));
+                        }
                     }
                 }
 
