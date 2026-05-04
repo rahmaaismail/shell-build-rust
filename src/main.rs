@@ -488,23 +488,43 @@ fn expand_vars(s: &str, shell_vars: &HashMap<String, String>) -> String {
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '$' {
-            let mut name = String::new();
-            while let Some(&nc) = chars.peek() {
-                if nc.is_alphanumeric() || nc == '_' {
+            if chars.peek() == Some(&'{') {
+                // ${VAR} form
+                chars.next(); // consume '{'
+                let mut name = String::new();
+                while let Some(&nc) = chars.peek() {
+                    if nc == '}' {
+                        chars.next(); // consume '}'
+                        break;
+                    }
                     name.push(nc);
                     chars.next();
-                } else {
-                    break;
+                }
+                if let Some(val) = shell_vars.get(&name) {
+                    result.push_str(val);
+                } else if let Ok(val) = env::var(&name) {
+                    result.push_str(&val);
+                }
+                // if not found, expands to empty string
+            } else {
+                // $VAR form
+                let mut name = String::new();
+                while let Some(&nc) = chars.peek() {
+                    if nc.is_alphanumeric() || nc == '_' {
+                        name.push(nc);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if name.is_empty() {
+                    result.push('$');
+                } else if let Some(val) = shell_vars.get(&name) {
+                    result.push_str(val);
+                } else if let Ok(val) = env::var(&name) {
+                    result.push_str(&val);
                 }
             }
-            if name.is_empty() {
-                result.push('$');
-            } else if let Some(val) = shell_vars.get(&name) {
-                result.push_str(val);
-            } else if let Ok(val) = env::var(&name) {
-                result.push_str(&val);
-            }
-            // if not found, expands to empty string (bash behavior)
         } else {
             result.push(c);
         }
