@@ -485,6 +485,19 @@ fn main() {
     let mut history: Vec<String> = Vec::new();
     let mut history_saved_count: usize = 0;
 
+    // Load history from HISTFILE on startup
+if let Ok(histfile) = env::var("HISTFILE") {
+    if let Ok(contents) = std::fs::read_to_string(&histfile) {
+        for line in contents.lines() {
+            if !line.is_empty() {
+                history.push(line.to_string());
+                let _ = rl.add_history_entry(line);
+            }
+        }
+        history_saved_count = history.len(); // don't re-append these on -a
+    }
+}
+
     loop {
         reap_jobs(&mut bg_jobs);
 
