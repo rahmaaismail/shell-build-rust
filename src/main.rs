@@ -7,6 +7,7 @@ use std::process::{Command, Stdio};
 use std::fs::{File, OpenOptions};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -38,13 +39,15 @@ fn longest_common_prefix(strings: &[String]) -> String {
 struct ShellHelper {
     last_prefix: RefCell<String>,
     tab_count: RefCell<usize>,
+    completions: Rc<RefCell<HashMap<String, String>>>,
 }
 
 impl ShellHelper {
-    fn new() -> Self {
+    fn new(completions: Rc<RefCell<HashMap<String, String>>>) -> Self {
         ShellHelper {
             last_prefix: RefCell::new(String::new()),
             tab_count: RefCell::new(0),
+            completions,
         }
     }
 
@@ -94,12 +97,36 @@ impl Completer for ShellHelper {
         let prefix = &line[..pos];
 
         if prefix.contains(' ') {
-            let file_prefix = if prefix.ends_with(' ') {
-                ""
-            } else {
+            let parts: Vec<&str> = prefix.splitn(2, ' ').collect();
+            let cmd_name = parts[0];
+            let arg_prefix = if prefix.ends_with(' ') { "" } else {
                 prefix.split(' ').last().unwrap_or("")
             };
 
+            // check if a completer script is registered for this command
+            let completer_path = self.completions.borrow().get(cmd_name).cloned();
+            if let Some(script_path) = completer_path {
+                let output = Command::new(&script_path)
+                    .output();
+
+                if let Ok(output) = output {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let candidates: Vec<&str> = stdout.lines().collect();
+
+                    if candidates.len() == 1 {
+                        let before_arg = &prefix[..prefix.len() - arg_prefix.len()];
+                        return Ok((0, vec![Pair {
+                            display: candidates[0].to_string(),
+                            replacement: format!("{}{} ", before_arg, candidates[0]),
+                        }]));
+                    }
+                }
+
+                return Ok((0, vec![]));
+            }
+
+            // no registered completer — fall back to file completion
+            let file_prefix = arg_prefix;
             let mut file_matches: Vec<(String, bool)> = Vec::new();
 
             let (dir, name_prefix) = if let Some(slash_pos) = file_prefix.rfind('/') {
@@ -364,10 +391,10 @@ fn main() {
         .completion_type(CompletionType::List)
         .build();
 
-    let mut rl = Editor::with_config(config).unwrap();
-    rl.set_helper(Some(ShellHelper::new()));
+    let completions: Rc<RefCell<HashMap<String, String>>> = Rc::new(RefCell::new(HashMap::new()));
 
-    let mut completions: HashMap<String, String> = HashMap::new();
+    let mut rl = Editor::with_config(config).unwrap();
+    rl.set_helper(Some(ShellHelper::new(Rc::clone(&completions))));
 
     loop {
         let readline = rl.readline("$ ");
@@ -447,7 +474,7 @@ fn main() {
                 } else if command == "complete" {
                     if args.first().map(|s| s.as_str()) == Some("-p") {
                         if let Some(cmd_name) = args.get(1) {
-                            if let Some(path) = completions.get(cmd_name.as_str()) {
+                            if let Some(path) = completions.borrow().get(cmd_name.as_str()) {
                                 println!("complete -C '{}' {}", path, cmd_name);
                             } else {
                                 println!("complete: {}: no completion specification", cmd_name);
@@ -455,7 +482,7 @@ fn main() {
                         }
                     } else if args.first().map(|s| s.as_str()) == Some("-C") {
                         if let (Some(path), Some(cmd_name)) = (args.get(1), args.get(2)) {
-                            completions.insert(cmd_name.clone(), path.clone());
+                            completions.borrow_mut().insert(cmd_name.clone(), path.clone());
                         }
                     }
                 } else if let Some(_path) = find_in_path(command) {
