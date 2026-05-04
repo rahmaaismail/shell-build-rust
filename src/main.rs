@@ -544,7 +544,13 @@ fn main() {
                 } else if command == "jobs" {
                     let total = bg_jobs.len();
                     for (i, (job_num, _pid, cmd_str)) in bg_jobs.iter().enumerate() {
-                        let marker = if i == total - 1 { "+" } else { "-" };
+                        let marker = if i == total - 1 { 
+                            "+"
+                        } else if i == total - 2 {
+                            "-"
+                        } else {
+                            " "
+                        };
                         println!("[{}]{}  {:<24}{} &", job_num, marker, "Running", cmd_str);
                     }
                 } else if command == "complete" {
