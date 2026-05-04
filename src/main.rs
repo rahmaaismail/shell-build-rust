@@ -17,7 +17,7 @@ use rustyline::validate::Validator;
 use rustyline::{CompletionType, Config, Context, Editor};
 use rustyline_derive::Helper;
 
-const BUILTINS: &[&str] = &["echo", "exit", "type", "pwd", "cd", "complete"];
+const BUILTINS: &[&str] = &["echo", "exit", "type", "pwd", "cd", "complete", "jobs"];
 
 fn longest_common_prefix(strings: &[String]) -> String {
     if strings.is_empty() {
@@ -451,6 +451,9 @@ fn main() {
     let mut rl = Editor::with_config(config).unwrap();
     rl.set_helper(Some(ShellHelper::new(Rc::clone(&completions))));
 
+    let mut job_counter: usize = 0;
+    let mut bg_jobs: Vec<(usize, u32, String)> = Vec::new();
+
     loop {
         let readline = rl.readline("$ ");
         match readline {
@@ -461,6 +464,18 @@ fn main() {
                 }
 
                 let parts = parse_args(input);
+                if parts.is_empty() {
+                    continue;
+                }
+
+                // detect background job
+                let background = parts.last().map(|s| s.as_str()) == Some("&");
+                let parts: Vec<String> = if background {
+                    parts[..parts.len() - 1].to_vec()
+                } else {
+                    parts
+                };
+
                 if parts.is_empty() {
                     continue;
                 }
@@ -526,6 +541,10 @@ fn main() {
                             println!("cd: {}: No such file or directory", dir);
                         }
                     }
+                } else if command == "jobs" {
+                    for (job_num, pid, cmd_str) in &bg_jobs {
+                        println!("[{}] Running                 {} &", job_num, cmd_str);
+                    }
                 } else if command == "complete" {
                     if args.first().map(|s| s.as_str()) == Some("-p") {
                         if let Some(cmd_name) = args.get(1) {
@@ -555,7 +574,16 @@ fn main() {
                         cmd.stderr(Stdio::from(open_file(file, append)));
                     }
 
-                    cmd.status().unwrap();
+                    if background {
+                        let child = cmd.spawn().unwrap();
+                        let pid = child.id();
+                        job_counter += 1;
+                        let cmd_str = format!("{} {}", command, args.join(" ")).trim().to_string();
+                        println!("[{}] {}", job_counter, pid);
+                        bg_jobs.push((job_counter, pid, cmd_str));
+                    } else {
+                        cmd.status().unwrap();
+                    }
                 } else {
                     println!("{}: command not found", command);
                 }
