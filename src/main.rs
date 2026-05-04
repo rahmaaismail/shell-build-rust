@@ -115,7 +115,6 @@ fn run_pipeline(segments: &[String]) {
             for &(r, w) in &pipes {
                 unsafe { libc::close(r); libc::close(w); }
             }
-            // suppress broken pipe errors from non-last segments
             if !is_last {
                 let dev_null = std::ffi::CString::new("/dev/null").unwrap();
                 let null_fd = unsafe { libc::open(dev_null.as_ptr(), libc::O_WRONLY) };
@@ -476,6 +475,14 @@ fn open_file(file: &str, append: bool) -> File {
     OpenOptions::new().write(true).create(true).append(append).truncate(!append).open(file).unwrap()
 }
 
+fn save_history(history: &[String], histfile: &str) {
+    if let Ok(mut f) = File::create(histfile) {
+        for cmd in history {
+            let _ = writeln!(f, "{}", cmd);
+        }
+    }
+}
+
 fn main() {
     let config = Config::builder().completion_type(CompletionType::List).build();
     let completions: Rc<RefCell<HashMap<String, String>>> = Rc::new(RefCell::new(HashMap::new()));
@@ -487,17 +494,17 @@ fn main() {
     let mut shell_vars: HashMap<String, String> = HashMap::new();
 
     // Load history from HISTFILE on startup
-if let Ok(histfile) = env::var("HISTFILE") {
-    if let Ok(contents) = std::fs::read_to_string(&histfile) {
-        for line in contents.lines() {
-            if !line.is_empty() {
-                history.push(line.to_string());
-                let _ = rl.add_history_entry(line);
+    if let Ok(histfile) = env::var("HISTFILE") {
+        if let Ok(contents) = std::fs::read_to_string(&histfile) {
+            for line in contents.lines() {
+                if !line.is_empty() {
+                    history.push(line.to_string());
+                    let _ = rl.add_history_entry(line);
+                }
             }
+            history_saved_count = history.len();
         }
-        history_saved_count = history.len(); // don't re-append these on -a
     }
-}
 
     loop {
         reap_jobs(&mut bg_jobs);
@@ -534,10 +541,7 @@ if let Ok(histfile) = env::var("HISTFILE") {
 
                 if command == "exit" {
                     if let Ok(histfile) = env::var("HISTFILE") {
-                        let mut f = File::create(&histfile).unwrap();
-                        for cmd in &history {
-                            writeln!(f, "{}", cmd).unwrap();
-                        }
+                        save_history(&history, &histfile);
                     }
                     break;
                 } else if command == "echo" {
@@ -615,12 +619,8 @@ if let Ok(histfile) = env::var("HISTFILE") {
                         let start = if let Some(n_str) = args.first() {
                             if let Ok(n) = n_str.parse::<usize>() {
                                 total.saturating_sub(n)
-                            } else {
-                                0
-                            }
-                        } else {
-                            0
-                        };
+                            } else { 0 }
+                        } else { 0 };
                         for (i, cmd) in history[start..].iter().enumerate() {
                             println!("{:>4}  {}", start + i + 1, cmd);
                         }
@@ -649,12 +649,20 @@ if let Ok(histfile) = env::var("HISTFILE") {
                             }
                         }
                     } else {
-                        // handle declare NAME=VALUE
                         for arg in args {
                             if let Some(eq_pos) = arg.find('=') {
                                 let name = &arg[..eq_pos];
-                                let value = &arg[eq_pos + 1..];
-                                shell_vars.insert(name.to_string(), value.to_string());
+                                let valid = {
+                                    let mut chars = name.chars();
+                                    chars.next().map(|c| c.is_alphabetic() || c == '_').unwrap_or(false)
+                                        && chars.all(|c| c.is_alphanumeric() || c == '_')
+                                };
+                                if valid {
+                                    let value = &arg[eq_pos + 1..];
+                                    shell_vars.insert(name.to_string(), value.to_string());
+                                } else {
+                                    eprintln!("declare: `{}': not a valid identifier", arg);
+                                }
                             }
                         }
                     }
@@ -680,10 +688,7 @@ if let Ok(histfile) = env::var("HISTFILE") {
             }
             Err(ReadlineError::Eof) => {
                 if let Ok(histfile) = env::var("HISTFILE") {
-                    let mut f = File::create(&histfile).unwrap();
-                    for cmd in &history {
-                        writeln!(f, "{}", cmd).unwrap();
-                    }
+                    save_history(&history, &histfile);
                 }
                 break;
             }
