@@ -91,6 +91,35 @@ impl Completer for ShellHelper {
         _ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
         let prefix = &line[..pos];
+
+        // if there's a space, user is typing an argument — do file completion
+        if prefix.contains(' ') {
+            let file_prefix = prefix.split_whitespace().last().unwrap_or("");
+            let mut file_matches = Vec::new();
+
+            if let Ok(entries) = std::fs::read_dir(".") {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.starts_with(file_prefix) {
+                        file_matches.push(name);
+                    }
+                }
+            }
+
+            file_matches.sort();
+
+            if file_matches.len() == 1 {
+                let before_file = &prefix[..prefix.len() - file_prefix.len()];
+                return Ok((0, vec![Pair {
+                    display: file_matches[0].clone(),
+                    replacement: format!("{}{} ", before_file, file_matches[0]),
+                }]));
+            }
+
+            return Ok((0, vec![]));
+        }
+
+        // no space — do command completion
         let matches = self.get_matches(prefix);
 
         if matches.is_empty() {
@@ -106,10 +135,8 @@ impl Completer for ShellHelper {
             }]));
         }
 
-        // find longest common prefix of all matches
         let lcp = longest_common_prefix(&matches);
 
-        // if LCP is longer than what user typed, complete to LCP (no trailing space)
         if lcp.len() > prefix.len() {
             *self.last_prefix.borrow_mut() = String::new();
             *self.tab_count.borrow_mut() = 0;
@@ -119,7 +146,6 @@ impl Completer for ShellHelper {
             }]));
         }
 
-        // LCP == prefix, multiple matches — bell then show all
         let current_prefix = prefix.to_string();
         let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
 
