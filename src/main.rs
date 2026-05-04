@@ -30,16 +30,40 @@ impl Completer for ShellHelper {
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
         let prefix = &line[..pos];
         let mut matches = Vec::new();
+        let mut seen = std::collections::HashSet::new();
 
+        // check builtins
         for &builtin in BUILTINS {
             if builtin.starts_with(prefix) {
                 matches.push(Pair {
                     display: builtin.to_string(),
                     replacement: format!("{} ", builtin),
                 });
+                seen.insert(builtin.to_string());
             }
         }
-
+        
+        // check PATH executables
+        if let Ok(path_var) = env::var("PATH") {
+            for dir in path_var.split(':') {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if name.starts_with(prefix) && !seen.contains(&name) {
+                            if let Ok(metadata) = entry.metadata() {
+                                if metadata.permissions().mode() & 0o111 != 0 {
+                                    seen.insert(name.clone());
+                                    matches.push(Pair {
+                                        display: name.clone(),
+                                        replacement: format!("{} ", name),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Ok((0, matches))
     }
 }
