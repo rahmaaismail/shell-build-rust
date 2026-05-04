@@ -475,7 +475,6 @@ fn main() {
     let mut rl = Editor::with_config(config).unwrap();
     rl.set_helper(Some(ShellHelper::new(Rc::clone(&completions))));
 
-    let mut job_counter: usize = 0;
     let mut bg_jobs: Vec<(usize, std::process::Child, String)> = Vec::new();
 
     loop {
@@ -567,7 +566,6 @@ fn main() {
                         }
                     }
                 } else if command == "jobs" {
-                    // Check for newly completed jobs and display them inline, then remove
                     let mut done = Vec::new();
                     for (i, (_, child, _)) in bg_jobs.iter_mut().enumerate() {
                         if let Ok(Some(_)) = child.try_wait() {
@@ -624,10 +622,15 @@ fn main() {
                     if background {
                         let child = cmd.spawn().unwrap();
                         let pid = child.id();
-                        job_counter += 1;
+                        // find smallest available job number
+                        let job_num = {
+                            let used: std::collections::HashSet<usize> =
+                                bg_jobs.iter().map(|(n, _, _)| *n).collect();
+                            (1..).find(|n| !used.contains(n)).unwrap()
+                        };
                         let cmd_str = format!("{} {}", command, args.join(" ")).trim().to_string();
-                        println!("[{}] {}", job_counter, pid);
-                        bg_jobs.push((job_counter, child, cmd_str));
+                        println!("[{}] {}", job_num, pid);
+                        bg_jobs.push((job_num, child, cmd_str));
                     } else {
                         cmd.status().unwrap();
                     }
