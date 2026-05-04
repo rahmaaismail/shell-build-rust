@@ -574,6 +574,13 @@ fn main() {
                                 }
                             }
                         }
+                    } else if args.first().map(|s| s.as_str()) == Some("-w") {
+                        if let Some(path) = args.get(1) {
+                            let mut f = File::create(path).unwrap();
+                            for cmd in &history {
+                                writeln!(f, "{}", cmd).unwrap();
+                            }
+                        }
                     } else {
                         let total = history.len();
                         let start = if let Some(n_str) = args.first() {
@@ -589,7 +596,7 @@ fn main() {
                             println!("{:>4}  {}", start + i + 1, cmd);
                         }
                     }
-                 } else if command == "complete" {
+                } else if command == "complete" {
                     if args.first().map(|s| s.as_str()) == Some("-p") {
                         if let Some(cmd_name) = args.get(1) {
                             if let Some(path) = completions.borrow().get(cmd_name.as_str()) {
