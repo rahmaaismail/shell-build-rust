@@ -103,10 +103,8 @@ impl Completer for ShellHelper {
                 prefix.split(' ').last().unwrap_or("")
             };
 
-            // check if a completer script is registered for this command
             let completer_path = self.completions.borrow().get(cmd_name).cloned();
             if let Some(script_path) = completer_path {
-                // get the word before the current one being completed
                 let all_parts: Vec<&str> = prefix.split_whitespace().collect();
                 let current_word = if prefix.ends_with(' ') { "" } else {
                     all_parts.last().copied().unwrap_or("")
@@ -120,9 +118,9 @@ impl Completer for ShellHelper {
                 };
 
                 let output = Command::new(&script_path)
-                    .arg(cmd_name)       // argv[1]: command name
-                    .arg(current_word)   // argv[2]: word being completed
-                    .arg(prev_word)      // argv[3]: previous word
+                    .arg(cmd_name)
+                    .arg(current_word)
+                    .arg(prev_word)
                     .env("COMP_LINE", prefix)
                     .env("COMP_POINT", prefix.len().to_string())
                     .output();
@@ -141,22 +139,19 @@ impl Completer for ShellHelper {
                     }
 
                     if candidates.len() > 1 {
-                        // check for LCP among candidates 
                         let candidate_strings: Vec<String> = candidates.iter().map(|s| s.to_string()).collect();
                         let lcp = longest_common_prefix(&candidate_strings);
 
                         if lcp.len() > current_word.len() {
-                            // can complete further to LCP
                             let before_arg = &prefix[..prefix.len() - current_word.len()];
                             *self.last_prefix.borrow_mut() = String::new();
                             *self.tab_count.borrow_mut() = 0;
                             return Ok((0, vec![Pair {
                                 display: lcp.clone(),
-                                replacement: format!("{}{}", before_arg,lcp),
+                                replacement: format!("{}{}", before_arg, lcp),
                             }]));
                         }
-                        
-                        // no LCP - bell on first tab, list on second
+
                         let current_prefix = prefix.to_string();
                         let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
 
@@ -166,7 +161,7 @@ impl Completer for ShellHelper {
                             *self.last_prefix.borrow_mut() = current_prefix;
                             *self.tab_count.borrow_mut() = 1;
                         }
-                        
+
                         let count = *self.tab_count.borrow();
 
                         if count == 1 {
@@ -176,10 +171,10 @@ impl Completer for ShellHelper {
                         } else {
                             *self.tab_count.borrow_mut() = 0;
                             println!();
-                            println!("{}", candidates.join(" "));
+                            println!("{}", candidates.join("  "));
                             print!("$ {}", prefix);
                             std::io::stdout().flush().unwrap();
-                            return Ok((0,vec![]));
+                            return Ok((0, vec![]));
                         }
                     }
                 }
@@ -187,7 +182,6 @@ impl Completer for ShellHelper {
                 return Ok((0, vec![]));
             }
 
-            // no registered completer — fall back to file completion
             let file_prefix = arg_prefix;
             let mut file_matches: Vec<(String, bool)> = Vec::new();
 
@@ -271,7 +265,6 @@ impl Completer for ShellHelper {
             }
         }
 
-        // no space — command completion
         let matches = self.get_matches(prefix);
 
         if matches.is_empty() {
@@ -545,6 +538,10 @@ fn main() {
                     } else if args.first().map(|s| s.as_str()) == Some("-C") {
                         if let (Some(path), Some(cmd_name)) = (args.get(1), args.get(2)) {
                             completions.borrow_mut().insert(cmd_name.clone(), path.clone());
+                        }
+                    } else if args.first().map(|s| s.as_str()) == Some("-r") {
+                        if let Some(cmd_name) = args.get(1) {
+                            completions.borrow_mut().remove(cmd_name.as_str());
                         }
                     }
                 } else if let Some(_path) = find_in_path(command) {
