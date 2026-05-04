@@ -4,7 +4,7 @@ use std::env;
 use std::path::Path;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 
 fn parse_args(input: &str) -> Vec<String> {
     let mut args = Vec::new();
@@ -61,21 +61,32 @@ fn parse_args(input: &str) -> Vec<String> {
     args
 }
 
-fn extract_redirect(parts: &[String]) -> (Vec<String>, Option<String>, Option<String>) {
+// returns (args, Option<(stdout_file, append)>, Option<(stderr_file, append)>)
+fn extract_redirect(parts: &[String]) -> (Vec<String>, Option<(String, bool)>, Option<(String, bool)>) {
     let mut args = Vec::new();
     let mut stdout_file = None;
     let mut stderr_file = None;
     let mut i = 0;
 
     while i < parts.len() {
-        if parts[i] == ">" || parts[i] == "1>" {
+        if parts[i] == ">>" || parts[i] == "1>>" {
             if i + 1 < parts.len() {
-                stdout_file = Some(parts[i + 1].clone());
+                stdout_file = Some((parts[i + 1].clone(), true));
+                i += 2;
+            }
+        } else if parts[i] == ">" || parts[i] == "1>" {
+            if i + 1 < parts.len() {
+                stdout_file = Some((parts[i + 1].clone(), false));
+                i += 2;
+            }
+        } else if parts[i] == "2>>" {
+            if i + 1 < parts.len() {
+                stderr_file = Some((parts[i + 1].clone(), true));
                 i += 2;
             }
         } else if parts[i] == "2>" {
             if i + 1 < parts.len() {
-                stderr_file = Some(parts[i + 1].clone());
+                stderr_file = Some((parts[i + 1].clone(), false));
                 i += 2;
             }
         } else {
@@ -85,6 +96,16 @@ fn extract_redirect(parts: &[String]) -> (Vec<String>, Option<String>, Option<St
     }
 
     (args, stdout_file, stderr_file)
+}
+
+fn open_file(file: &str, append: bool) -> File {
+    OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(append)
+        .truncate(!append)
+        .open(file)
+        .unwrap()
 }
 
 fn find_in_path(command: &str) -> Option<String> {
@@ -119,14 +140,14 @@ fn main() {
             continue;
         }
 
-        let (parts, stdout_file, stderr_file) = extract_redirect(&parts);
+        let (parts, stdout_redirect, stderr_redirect) = extract_redirect(&parts);
         if parts.is_empty() {
             continue;
         }
 
-        // create stderr file for builtins (they don't write to stderr)
-        if let Some(ref file) = stderr_file {
-            File::create(file).unwrap();
+        // create/append stderr file for builtins (they don't write to stderr)
+        if let Some((ref file, append)) = stderr_redirect {
+            open_file(file, append);
         }
 
         let command = &parts[0];
@@ -136,8 +157,8 @@ fn main() {
             break;
         } else if command == "echo" {
             let output = args.join(" ");
-            if let Some(ref file) = stdout_file {
-                let mut f = File::create(file).unwrap();
+            if let Some((ref file, append)) = stdout_redirect {
+                let mut f = open_file(file, append);
                 writeln!(f, "{}", output).unwrap();
             } else {
                 println!("{}", output);
@@ -151,8 +172,8 @@ fn main() {
                 } else {
                     format!("{}: not found", arg)
                 };
-                if let Some(ref file) = stdout_file {
-                    let mut f = File::create(file).unwrap();
+                if let Some((ref file, append)) = stdout_redirect {
+                    let mut f = open_file(file, append);
                     writeln!(f, "{}", result).unwrap();
                 } else {
                     println!("{}", result);
@@ -161,8 +182,8 @@ fn main() {
         } else if command == "pwd" {
             let cwd = env::current_dir().unwrap();
             let output = cwd.display().to_string();
-            if let Some(ref file) = stdout_file {
-                let mut f = File::create(file).unwrap();
+            if let Some((ref file, append)) = stdout_redirect {
+                let mut f = open_file(file, append);
                 writeln!(f, "{}", output).unwrap();
             } else {
                 println!("{}", output);
@@ -185,11 +206,11 @@ fn main() {
             let mut cmd = Command::new(command);
             cmd.args(args);
 
-            if let Some(ref file) = stdout_file {
-                cmd.stdout(Stdio::from(File::create(file).unwrap()));
+            if let Some((ref file, append)) = stdout_redirect {
+                cmd.stdout(Stdio::from(open_file(file, append)));
             }
-            if let Some(ref file) = stderr_file {
-                cmd.stderr(Stdio::from(File::create(file).unwrap()));
+            if let Some((ref file, append)) = stderr_redirect {
+                cmd.stderr(Stdio::from(open_file(file, append)));
             }
 
             cmd.status().unwrap();
