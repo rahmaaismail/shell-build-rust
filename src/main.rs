@@ -5,6 +5,7 @@ use std::path::Path;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::fs::{File, OpenOptions};
+use std::cell::RefCell;
 
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -17,7 +18,52 @@ use rustyline_derive::Helper;
 const BUILTINS: &[&str] = &["echo", "exit", "type", "pwd", "cd"];
 
 #[derive(Helper)]
-struct ShellHelper;
+struct ShellHelper {
+    last_prefix: RefCell<String>,
+    tab_count: RefCell<usize>,
+}
+
+impl ShellHelper {
+    fn new() -> Self {
+        ShellHelper {
+            last_prefix: RefCell::new(String::new()),
+            tab_count: RefCell::new(0),
+        }
+    }
+
+    fn get_matches(&self, prefix: &str) -> Vec<String> {
+        let mut matches = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for &builtin in BUILTINS {
+            if builtin.starts_with(prefix) {
+                matches.push(builtin.to_string());
+                seen.insert(builtin.to_string());
+            }
+        }
+
+        if let Ok(path_var) = env::var("PATH") {
+            for dir in path_var.split(':') {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if name.starts_with(prefix) && !seen.contains(&name) {
+                            if let Ok(metadata) = entry.metadata() {
+                                if metadata.permissions().mode() & 0o111 != 0 {
+                                    seen.insert(name.clone());
+                                    matches.push(name);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        matches.sort();
+        matches
+    }
+}
 
 impl Completer for ShellHelper {
     type Candidate = Pair;
@@ -29,42 +75,48 @@ impl Completer for ShellHelper {
         _ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
         let prefix = &line[..pos];
-        let mut matches = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        let matches = self.get_matches(prefix);
 
-        // check builtins
-        for &builtin in BUILTINS {
-            if builtin.starts_with(prefix) {
-                matches.push(Pair {
-                    display: builtin.to_string(),
-                    replacement: format!("{} ", builtin),
-                });
-                seen.insert(builtin.to_string());
+        if matches.len() == 1 {
+            // single match — complete immediately
+            *self.last_prefix.borrow_mut() = String::new();
+            *self.tab_count.borrow_mut() = 0;
+            return Ok((0, vec![Pair {
+                display: matches[0].clone(),
+                replacement: format!("{} ", matches[0]),
+            }]));
+        }
+
+        if matches.len() > 1 {
+            let current_prefix = prefix.to_string();
+            let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
+
+            if is_same_prefix {
+                *self.tab_count.borrow_mut() += 1;
+            } else {
+                *self.last_prefix.borrow_mut() = current_prefix;
+                *self.tab_count.borrow_mut() = 1;
+            }
+
+            let count = *self.tab_count.borrow();
+
+            if count == 1 {
+                // first tab — ring bell
+                print!("\x07");
+                std::io::stdout().flush().unwrap();
+                return Ok((0, vec![]));
+            } else {
+                // second tab — print all matches
+                *self.tab_count.borrow_mut() = 0;
+                println!();
+                println!("{}", matches.join("  "));
+                print!("$ {}", prefix);
+                std::io::stdout().flush().unwrap();
+                return Ok((0, vec![]));
             }
         }
-        
-        // check PATH executables
-        if let Ok(path_var) = env::var("PATH") {
-            for dir in path_var.split(':') {
-                if let Ok(entries) = std::fs::read_dir(dir) {
-                    for entry in entries.flatten() {
-                        let name = entry.file_name().to_string_lossy().to_string();
-                        if name.starts_with(prefix) && !seen.contains(&name) {
-                            if let Ok(metadata) = entry.metadata() {
-                                if metadata.permissions().mode() & 0o111 != 0 {
-                                    seen.insert(name.clone());
-                                    matches.push(Pair {
-                                        display: name.clone(),
-                                        replacement: format!("{} ", name),
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok((0, matches))
+
+        Ok((0, vec![]))
     }
 }
 
@@ -197,7 +249,7 @@ fn main() {
         .build();
 
     let mut rl = Editor::with_config(config).unwrap();
-    rl.set_helper(Some(ShellHelper));
+    rl.set_helper(Some(ShellHelper::new()));
 
     loop {
         let readline = rl.readline("$ ");
