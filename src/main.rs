@@ -92,14 +92,14 @@ impl Completer for ShellHelper {
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
         let prefix = &line[..pos];
 
-        // if there's a space, user is typing an argument — do file/dir completion
         if prefix.contains(' ') {
-            let file_prefix = if prefix.ends_with(' '){
+            let file_prefix = if prefix.ends_with(' ') {
                 ""
             } else {
                 prefix.split(' ').last().unwrap_or("")
             };
-            let mut file_matches: Vec<(String, bool)> = Vec::new(); // (path, is_dir)
+
+            let mut file_matches: Vec<(String, bool)> = Vec::new();
 
             let (dir, name_prefix) = if let Some(slash_pos) = file_prefix.rfind('/') {
                 (&file_prefix[..slash_pos + 1], &file_prefix[slash_pos + 1..])
@@ -121,20 +121,55 @@ impl Completer for ShellHelper {
 
             file_matches.sort_by(|a, b| a.0.cmp(&b.0));
 
+            if file_matches.is_empty() {
+                return Ok((0, vec![]));
+            }
+
             if file_matches.len() == 1 {
                 let (matched_path, is_dir) = &file_matches[0];
                 let cmd_and_space = &prefix[..prefix.len() - file_prefix.len()];
                 let suffix = if *is_dir { "/" } else { " " };
+                *self.last_prefix.borrow_mut() = String::new();
+                *self.tab_count.borrow_mut() = 0;
                 return Ok((0, vec![Pair {
                     display: matched_path.clone(),
                     replacement: format!("{}{}{}", cmd_and_space, matched_path, suffix),
                 }]));
             }
 
-            return Ok((0, vec![]));
+            // multiple matches — bell on first tab, list on second
+            let current_prefix = prefix.to_string();
+            let is_same_prefix = *self.last_prefix.borrow() == current_prefix;
+
+            if is_same_prefix {
+                *self.tab_count.borrow_mut() += 1;
+            } else {
+                *self.last_prefix.borrow_mut() = current_prefix;
+                *self.tab_count.borrow_mut() = 1;
+            }
+
+            let count = *self.tab_count.borrow();
+
+            if count == 1 {
+                print!("\x07");
+                std::io::stdout().flush().unwrap();
+                return Ok((0, vec![]));
+            } else {
+                *self.tab_count.borrow_mut() = 0;
+                println!();
+                let display: Vec<String> = file_matches.iter()
+                    .map(|(name, is_dir)| {
+                        if *is_dir { format!("{}/", name) } else { name.clone() }
+                    })
+                    .collect();
+                println!("{}", display.join("  "));
+                print!("$ {}", prefix);
+                std::io::stdout().flush().unwrap();
+                return Ok((0, vec![]));
+            }
         }
 
-        // no space — do command completion
+        // no space — command completion
         let matches = self.get_matches(prefix);
 
         if matches.is_empty() {
