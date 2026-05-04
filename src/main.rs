@@ -483,6 +483,35 @@ fn save_history(history: &[String], histfile: &str) {
     }
 }
 
+fn expand_vars(s: &str, shell_vars: &HashMap<String, String>) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '$' {
+            let mut name = String::new();
+            while let Some(&nc) = chars.peek() {
+                if nc.is_alphanumeric() || nc == '_' {
+                    name.push(nc);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            if name.is_empty() {
+                result.push('$');
+            } else if let Some(val) = shell_vars.get(&name) {
+                result.push_str(val);
+            } else if let Ok(val) = env::var(&name) {
+                result.push_str(&val);
+            }
+            // if not found, expands to empty string (bash behavior)
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 fn main() {
     let config = Config::builder().completion_type(CompletionType::List).build();
     let completions: Rc<RefCell<HashMap<String, String>>> = Rc::new(RefCell::new(HashMap::new()));
@@ -538,6 +567,12 @@ fn main() {
 
                 let command = &parts[0];
                 let args = &parts[1..];
+
+                // expand variables in command and args
+                let command = expand_vars(command, &shell_vars);
+                let command = command.as_str();
+                let expanded_args: Vec<String> = args.iter().map(|a| expand_vars(a, &shell_vars)).collect();
+                let args = expanded_args.as_slice();
 
                 if command == "exit" {
                     if let Ok(histfile) = env::var("HISTFILE") {
