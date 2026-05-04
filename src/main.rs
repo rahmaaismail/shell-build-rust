@@ -106,7 +106,23 @@ impl Completer for ShellHelper {
             // check if a completer script is registered for this command
             let completer_path = self.completions.borrow().get(cmd_name).cloned();
             if let Some(script_path) = completer_path {
+                // get the word before the current one being completed
+                let all_parts: Vec<&str> = prefix.split_whitespace().collect();
+                let current_word = if prefix.ends_with(' ') { "" } else {
+                    all_parts.last().copied().unwrap_or("")
+                };
+                let prev_word = if prefix.ends_with(' ') {
+                    all_parts.last().copied().unwrap_or("")
+                } else if all_parts.len() >= 2 {
+                    all_parts[all_parts.len() - 2]
+                } else {
+                    ""
+                };
+
                 let output = Command::new(&script_path)
+                    .arg(cmd_name)       // argv[1]: command name
+                    .arg(current_word)   // argv[2]: word being completed
+                    .arg(prev_word)      // argv[3]: previous word
                     .output();
 
                 if let Ok(output) = output {
@@ -114,7 +130,7 @@ impl Completer for ShellHelper {
                     let candidates: Vec<&str> = stdout.lines().collect();
 
                     if candidates.len() == 1 {
-                        let before_arg = &prefix[..prefix.len() - arg_prefix.len()];
+                        let before_arg = &prefix[..prefix.len() - current_word.len()];
                         return Ok((0, vec![Pair {
                             display: candidates[0].to_string(),
                             replacement: format!("{}{} ", before_arg, candidates[0]),
