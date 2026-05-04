@@ -483,6 +483,7 @@ fn main() {
     rl.set_helper(Some(ShellHelper::new(Rc::clone(&completions))));
     let mut bg_jobs: Vec<(usize, std::process::Child, String)> = Vec::new();
     let mut history: Vec<String> = Vec::new();
+    let mut history_saved_count: usize = 0;
 
     loop {
         reap_jobs(&mut bg_jobs);
@@ -580,6 +581,14 @@ fn main() {
                             for cmd in &history {
                                 writeln!(f, "{}", cmd).unwrap();
                             }
+                        }
+                    } else if args.first().map(|s| s.as_str()) == Some("-a") {
+                        if let Some(path) = args.get(1) {
+                            let mut f = OpenOptions::new().create(true).append(true).open(path).unwrap();
+                            for cmd in &history[history_saved_count..] {
+                                writeln!(f, "{}", cmd).unwrap();
+                            }
+                            history_saved_count = history.len();
                         }
                     } else {
                         let total = history.len();
