@@ -19,7 +19,7 @@ use rustyline_derive::Helper;
 
 extern crate libc;
 
-const BUILTINS: &[&str] = &["echo", "exit", "type", "pwd", "cd", "complete", "jobs", "history"];
+const BUILTINS: &[&str] = &["echo", "exit", "type", "pwd", "cd", "complete", "jobs", "history", "declare"];
 
 fn longest_common_prefix(strings: &[String]) -> String {
     if strings.is_empty() { return String::new(); }
@@ -484,6 +484,7 @@ fn main() {
     let mut bg_jobs: Vec<(usize, std::process::Child, String)> = Vec::new();
     let mut history: Vec<String> = Vec::new();
     let mut history_saved_count: usize = 0;
+    let mut shell_vars: HashMap<String, String> = HashMap::new();
 
     // Load history from HISTFILE on startup
 if let Ok(histfile) = env::var("HISTFILE") {
@@ -637,6 +638,16 @@ if let Ok(histfile) = env::var("HISTFILE") {
                         }
                     } else if args.first().map(|s| s.as_str()) == Some("-r") {
                         if let Some(cmd_name) = args.get(1) { completions.borrow_mut().remove(cmd_name.as_str()); }
+                    }
+                } else if command == "declare" {
+                    if args.first().map(|s| s.as_str()) == Some("-p") {
+                        if let Some(var_name) = args.get(1) {
+                            if let Some(value) = shell_vars.get(var_name.as_str()) {
+                                println!("declare -- {}=\"{}\"", var_name, value);
+                            } else {
+                                eprintln!("declare: {}: not found", var_name);
+                            }
+                        }
                     }
                 } else if let Some(_path) = find_in_path(command) {
                     let mut cmd = Command::new(command);
