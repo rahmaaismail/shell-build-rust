@@ -542,8 +542,10 @@ fn main() {
                         }
                     }
                 } else if command == "jobs" {
-                    for (job_num, pid, cmd_str) in &bg_jobs {
-                        println!("[{}] Running                 {} &", job_num, cmd_str);
+                    let total = bg_jobs.len();
+                    for (i, (job_num, _pid, cmd_str)) in bg_jobs.iter().enumerate() {
+                        let marker = if i == total - 1 { "+" } else { "-" };
+                        println!("[{}]{}  {:<24}{} &", job_num, marker, "Running", cmd_str);
                     }
                 } else if command == "complete" {
                     if args.first().map(|s| s.as_str()) == Some("-p") {
